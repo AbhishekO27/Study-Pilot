@@ -1,0 +1,9 @@
+# Phase 0 — load configuration from a .env file.
+python-dotenv>=1.0.1
+
+# Phase 1 — Gemini chat model with tool calling. 3.1.0 is the first release
+# that passes Gemini 3 "thought signatures" back correctly during tool calls.
+langchain-google-genai>=3.1.0
+
+# Tests for tools (no network needed).
+pytest>=8.0

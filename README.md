@@ -1,0 +1,95 @@
+# StudyPilot
+
+StudyPilot turns a student's lecture PDFs and notes into a study assistant: answers grounded in the material (with citations), quizzes that expose weak topics, and a revision schedule aimed at an exam date.
+
+This repository is built one phase at a time so each piece can be explained in an interview.
+
+**Current phase: 1 — a tool-calling agent loop written by hand.** Retrieval over PDFs, quizzes, and the UI are not built yet.
+
+## Learning goals
+
+- What an agent loop actually is (call a tool, observe the result, repeat)
+- When a fixed workflow is enough, and when a LangGraph agent is worth it
+- RAG: chunking, embeddings, retrieval, citations
+- Reliability: structured outputs, a grader loop, retries, and a hard iteration limit
+- Evaluation with numbers (correctness, citation accuracy, hallucination rate)
+- Optional tracing with LangSmith
+
+## Tech stack
+
+| Piece | Choice |
+| --- | --- |
+| Language | Python 3.11 |
+| Agent framework | LangGraph + LangChain (from Phase 1 onward) |
+| LLM | Gemini free tier, via `.env` |
+| Vector store | Chroma (Phase 2) |
+| Persistence | SQLite (later phases) |
+| UI | Streamlit (Phase 9) |
+| Tracing | LangSmith, optional (Phase 9) |
+
+## Setup (Windows, PowerShell)
+
+Install [Python 3.11](https://www.python.org/downloads/) if `py -3.11 --version` fails. During install, enable the py launcher.
+
+```powershell
+cd C:\Users\abhis\Study-Pilot
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Open `.env` and paste a key from [Google AI Studio](https://aistudio.google.com/apikey). Leave `GEMINI_MODEL` as `gemini-3.8-flash` unless you have a reason to change it.
+
+```powershell
+python scripts/check_setup.py
+```
+
+A passing run prints the Python version, the package version, and `GEMINI_API_KEY: set (value hidden)`. It does not call the API.
+
+## Run the Phase 1 agent
+
+```powershell
+pytest                                    # tool tests, no API key needed
+python scripts/run_phase1.py              # three demo questions
+python scripts/run_phase1.py "What is a deadlock, and what is 17 * 23?"
+```
+
+The agent has two tools: a calculator and a keyword search over `data/sample/study_notes.txt` (operating systems notes). Each step is printed, so you can watch the model ask for a tool, get the result, and either ask again or answer. It stops after 5 model calls no matter what.
+
+The loop lives in `studypilot/agents/simple_agent.py` and is about 60 lines. Read it before Phase 3; LangGraph is that loop drawn as a graph.
+
+If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once, then activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+## Layout
+
+```
+studypilot/     importable package (agents, graph, tools, rag, models, ui)
+  llm.py        builds the Gemini chat model from .env
+data/sample/    small course files (study_notes.txt now; PDFs in Phase 2)
+evals/          accuracy scripts, added in Phase 8
+docs/           learning notes and design decisions
+tests/          pytest, offline
+scripts/        check_setup.py, run_phase1.py
+```
+
+Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
+
+## Status
+
+| Phase | What it adds | State |
+| --- | --- | --- |
+| 0 | Layout, venv, `.env`, setup check | Done |
+| 1 | Hand-written tool-calling loop | Done |
+| 2 | RAG pipeline | Not started |
+| 3 | LangGraph Q&A graph | Not started |
+| 4 | Grader, structured outputs, fallback | Not started |
+| 5 | Quiz and weak-topic tracking | Not started |
+| 6 | Revision plan with human approval | Not started |
+| 7 | Supervisor and persisted sessions | Not started |
+| 8 | Evaluation numbers | Not started |
+| 9 | Streamlit UI and README polish | Not started |

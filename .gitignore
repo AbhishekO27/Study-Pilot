@@ -1,0 +1,27 @@
+# Local environment. The example file is committed; the real file is not.
+.venv/
+venv/
+.env
+
+# Bytecode and tool caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Generated indexes and session databases (later phases)
+chroma_db/
+.chroma/
+*.sqlite
+*.sqlite3
+
+# Course uploads stay on your machine. data/sample/ is the committed folder.
+data/uploads/
+
+# Streamlit local secrets, if the UI adds them later
+.streamlit/secrets.toml
+
+# OS junk
+.DS_Store
+Thumbs.db

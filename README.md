@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 1 — a tool-calling agent loop written by hand.** Retrieval over PDFs, quizzes, and the UI are not built yet.
+**Current phase: 2 — a standalone RAG pipeline.** PDFs are chunked, embedded, and searched with page citations. The agent does not use this retriever yet (that is Phase 3). Quizzes and the UI are not built.
 
 ## Learning goals
 
@@ -59,6 +59,23 @@ The agent has two tools: a calculator and a keyword search over `data/sample/stu
 
 The loop lives in `studypilot/agents/simple_agent.py` and is about 60 lines. Read it before Phase 3; LangGraph is that loop drawn as a graph.
 
+## Run the Phase 2 RAG pipeline
+
+No Gemini key is required. First ingest downloads a small local embedding model (~80MB) into the Chroma cache.
+
+```powershell
+pip install -r requirements.txt
+python scripts/run_phase2.py
+python scripts/run_phase2.py --query "What is a deadlock?"
+pytest
+```
+
+`run_phase2.py` indexes `data/sample/os_lecture_notes.pdf` into `chroma_db/` (gitignored) and prints the nearest chunks with filename, page, and distance. Smaller distance means a closer match.
+
+If you edit the sample PDF, rebuild it with `python scripts/make_sample_pdf.py`.
+
+`docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
+
 If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once, then activate again:
 
 ```powershell
@@ -70,11 +87,12 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 studypilot/     importable package (agents, graph, tools, rag, models, ui)
   llm.py        builds the Gemini chat model from .env
-data/sample/    small course files (study_notes.txt now; PDFs in Phase 2)
+studypilot/rag/ load, chunk, embed, retrieve
+data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
 evals/          accuracy scripts, added in Phase 8
-docs/           learning notes and design decisions
+docs/           local learning notes (not tracked)
 tests/          pytest, offline
-scripts/        check_setup.py, run_phase1.py
+scripts/        check_setup.py, run_phase1.py, run_phase2.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -85,7 +103,7 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | --- | --- | --- |
 | 0 | Layout, venv, `.env`, setup check | Done |
 | 1 | Hand-written tool-calling loop | Done |
-| 2 | RAG pipeline | Not started |
+| 2 | RAG pipeline | Done |
 | 3 | LangGraph Q&A graph | Not started |
 | 4 | Grader, structured outputs, fallback | Not started |
 | 5 | Quiz and weak-topic tracking | Not started |

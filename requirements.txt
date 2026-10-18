@@ -14,3 +14,6 @@ fpdf2>=2.8
 langchain-text-splitters>=0.3
 langchain-chroma>=0.2
 chromadb>=0.5
+
+# Phase 3 — the same Q&A steps drawn as a LangGraph (state, nodes, edges).
+langgraph>=0.2

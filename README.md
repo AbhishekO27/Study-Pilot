@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 2 — a standalone RAG pipeline.** PDFs are chunked, embedded, and searched with page citations. The agent does not use this retriever yet (that is Phase 3). Quizzes and the UI are not built.
+**Current phase: 3 — a LangGraph that routes a question, retrieves chunks, and answers with page citations.** Quiz and revision planning are routed but not built yet. The UI is not built.
 
 ## Learning goals
 
@@ -74,6 +74,20 @@ pytest
 
 If you edit the sample PDF, rebuild it with `python scripts/make_sample_pdf.py`.
 
+## Run the Phase 3 graph
+
+Q&A calls Gemini. Quiz and planning questions do not: the router sends them to a stub that names the later phase.
+
+```powershell
+python scripts/run_phase3.py
+python scripts/run_phase3.py "What are the Coffman conditions for deadlock?"
+pytest
+```
+
+If `chroma_db/` is missing, the script indexes `os_lecture_notes.pdf` first. The graph is `studypilot/graph/qa_graph.py`: `route`, then `retrieve`, then `answer`. A quiz-shaped question skips retrieval.
+
+The Phase 1 loop is still there (`python scripts/run_phase1.py`). Phase 3 does not replace it. It is the same idea with the branch written as an edge.
+
 `docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
 
 If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once, then activate again:
@@ -92,7 +106,8 @@ data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
 evals/          accuracy scripts, added in Phase 8
 docs/           local learning notes (not tracked)
 tests/          pytest, offline
-scripts/        check_setup.py, run_phase1.py, run_phase2.py, make_sample_pdf.py
+studypilot/graph/  Phase 3 LangGraph (qa_graph.py)
+scripts/        check_setup.py, run_phase1.py, run_phase2.py, run_phase3.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -104,7 +119,7 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | 0 | Layout, venv, `.env`, setup check | Done |
 | 1 | Hand-written tool-calling loop | Done |
 | 2 | RAG pipeline | Done |
-| 3 | LangGraph Q&A graph | Not started |
+| 3 | LangGraph Q&A graph | Done |
 | 4 | Grader, structured outputs, fallback | Not started |
 | 5 | Quiz and weak-topic tracking | Not started |
 | 6 | Revision plan with human approval | Not started |

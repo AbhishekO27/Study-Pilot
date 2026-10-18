@@ -7,8 +7,9 @@ This is the whole idea of an agent:
     3. otherwise it asked for one or more tool calls: run them
     4. append the results to the conversation and go back to step 1
 
-LangGraph (Phase 3) is a way of drawing this loop as a graph. Reading this
-file first makes the graph version obvious instead of magical.
+LangGraph (Phase 3) draws a fixed version of this loop in
+studypilot/graph/qa_graph.py: route, then retrieve, then answer. Read this
+file first so the graph is the same idea with the branches written out.
 """
 
 from __future__ import annotations

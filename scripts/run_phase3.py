@@ -72,6 +72,9 @@ def main() -> int:
             return 1
         print(f"ROUTE: {state['route']}")
         if state["route"] == "qa":
+            print(f"RETRIES: {state.get('retries', 0)}  GRADE: {state.get('grade_action', '')}")
+            if state.get("grade_reason"):
+                print(f"REASON: {state['grade_reason']}")
             for chunk in state.get("chunks") or []:
                 print(f"  retrieved {chunk['source']}, p. {chunk['page']}")
         print(f"\nANSWER:\n{state['answer']}\n")

@@ -8,7 +8,13 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import AIMessage
 
-from studypilot.graph.qa_graph import MAX_GRAPH_STEPS, build_qa_graph, classify_question
+from studypilot.graph.qa_graph import (
+    FALLBACK,
+    MAX_GRAPH_STEPS,
+    build_qa_graph,
+    classify_question,
+)
+from studypilot.models.schemas import GradeResult
 from studypilot.rag.store import ingest_documents
 
 _KEYWORDS = ("deadlock", "coffman", "quantum", "amdahl", "thread")
@@ -39,6 +45,25 @@ class FakeModel:
         return AIMessage(content="Deadlock needs four Coffman conditions (os.pdf, p. 5).")
 
 
+def accept_grade(_state: dict) -> GradeResult:
+    return GradeResult(supported=True, reason="The draft matches the excerpts.", rewritten_query="")
+
+
+class ScriptedGrader:
+    """Returns a fixed sequence of grades, one per grader visit."""
+
+    def __init__(self, results: list[GradeResult]) -> None:
+        self.results = results
+        self.calls = 0
+        self.queries: list[str] = []
+
+    def __call__(self, state: dict) -> GradeResult:
+        self.queries.append(state.get("search_query") or state["question"])
+        result = self.results[self.calls]
+        self.calls += 1
+        return result
+
+
 def _index(tmp_path: Path) -> tuple[Path, KeywordEmbeddings]:
     documents = [
         Document(
@@ -58,7 +83,17 @@ def _index(tmp_path: Path) -> tuple[Path, KeywordEmbeddings]:
 
 def _run(graph, question: str) -> dict:
     return graph.invoke(
-        {"question": question, "route": "qa", "chunks": [], "answer": ""},
+        {
+            "question": question,
+            "search_query": "",
+            "route": "qa",
+            "chunks": [],
+            "draft": "",
+            "answer": "",
+            "retries": 0,
+            "grade_action": "accept",
+            "grade_reason": "",
+        },
         config={"recursion_limit": MAX_GRAPH_STEPS},
     )
 
@@ -73,11 +108,18 @@ def test_classify_question() -> None:
 def test_qa_path_retrieves_and_cites(tmp_path: Path) -> None:
     persist, embeddings = _index(tmp_path)
     model = FakeModel()
-    graph = build_qa_graph(persist_directory=persist, embeddings=embeddings, chat_model=model)
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=model,
+        grader=accept_grade,
+    )
 
     state = _run(graph, "What are the Coffman conditions for deadlock?")
 
     assert state["route"] == "qa"
+    assert state["grade_action"] == "accept"
+    assert state["retries"] == 0
     assert model.calls == 1
     assert state["chunks"][0]["page"] == 5
     assert "os.pdf, page 5" in model.last_prompt
@@ -103,7 +145,8 @@ def test_empty_index_skips_the_model(tmp_path: Path) -> None:
     assert state["route"] == "qa"
     assert state["chunks"] == []
     assert model.calls == 0
-    assert state["answer"] == "I couldn't find this in your material."
+    assert state["grade_action"] == "give_up"
+    assert state["answer"] == FALLBACK
 
 
 def test_quiz_and_plan_do_not_retrieve_or_call_the_model(tmp_path: Path) -> None:
@@ -120,3 +163,61 @@ def test_quiz_and_plan_do_not_retrieve_or_call_the_model(tmp_path: Path) -> None
     assert plan["route"] == "plan"
     assert "Phase 6" in plan["answer"]
     assert model.calls == 0
+
+
+def test_grader_retries_once_then_accepts(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    model = FakeModel()
+    grader = ScriptedGrader(
+        [
+            GradeResult(
+                supported=False,
+                reason="The draft does not name the conditions.",
+                rewritten_query="Coffman deadlock conditions",
+            ),
+            GradeResult(supported=True, reason="The conditions are in the excerpt.", rewritten_query=""),
+        ]
+    )
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=model,
+        grader=grader,
+    )
+
+    state = _run(graph, "What is deadlock?")
+
+    assert grader.calls == 2
+    assert model.calls == 2
+    assert state["retries"] == 1
+    assert state["grade_action"] == "accept"
+    assert state["search_query"] == "Coffman deadlock conditions"
+    assert "Retrieved sources:" in state["answer"]
+    assert "os.pdf, p. 5" in state["answer"]
+
+
+def test_grader_gives_up_after_two_retries(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    model = FakeModel()
+    reject = GradeResult(
+        supported=False,
+        reason="The excerpts never mention this.",
+        rewritten_query="still missing",
+    )
+    grader = ScriptedGrader([reject, reject, reject])
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=model,
+        grader=grader,
+    )
+
+    state = _run(graph, "What is deadlock?")
+
+    # First answer, then two retries: three drafts and three grades.
+    assert model.calls == 3
+    assert grader.calls == 3
+    assert state["retries"] == 2
+    assert state["grade_action"] == "give_up"
+    assert state["answer"] == FALLBACK
+    assert "Retrieved sources:" not in state["answer"]

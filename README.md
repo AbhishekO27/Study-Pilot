@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 3 — a LangGraph that routes a question, retrieves chunks, and answers with page citations.** Quiz and revision planning are routed but not built yet. The UI is not built.
+**Current phase: 4 — the Q&A graph grades its own answer and retries retrieval at most twice.** Quiz and revision planning have Pydantic schemas, but those features are not built yet. The UI is not built.
 
 ## Learning goals
 
@@ -88,6 +88,19 @@ If `chroma_db/` is missing, the script indexes `os_lecture_notes.pdf` first. The
 
 The Phase 1 loop is still there (`python scripts/run_phase1.py`). Phase 3 does not replace it. It is the same idea with the branch written as an edge.
 
+## Run the Phase 4 grader
+
+Q&A now calls Gemini twice per attempt: once to draft, once to grade. A grade of "not supported" searches again, up to two extra times. If the notes still do not support an answer, you get `I couldn't find this in your material.`
+
+```powershell
+python scripts/run_phase4.py
+pytest
+```
+
+The demo asks a deadlock question, then asks for the capital of France. The second one should give up, because that fact is not in the sample PDF. `RETRIES` and `GRADE` print above the answer.
+
+Quiz questions, answer grades, and revision plans are Pydantic models in `studypilot/models/schemas.py`. The graph does not generate them yet.
+
 `docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
 
 If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once, then activate again:
@@ -106,8 +119,9 @@ data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
 evals/          accuracy scripts, added in Phase 8
 docs/           local learning notes (not tracked)
 tests/          pytest, offline
-studypilot/graph/  Phase 3 LangGraph (qa_graph.py)
-scripts/        check_setup.py, run_phase1.py, run_phase2.py, run_phase3.py, make_sample_pdf.py
+studypilot/graph/  LangGraph Q&A with a grader retry
+studypilot/models/ Pydantic schemas (grade, quiz, plan)
+scripts/        check_setup.py, run_phase1.py, run_phase2.py, run_phase3.py, run_phase4.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -120,7 +134,7 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | 1 | Hand-written tool-calling loop | Done |
 | 2 | RAG pipeline | Done |
 | 3 | LangGraph Q&A graph | Done |
-| 4 | Grader, structured outputs, fallback | Not started |
+| 4 | Grader, structured outputs, fallback | Done |
 | 5 | Quiz and weak-topic tracking | Not started |
 | 6 | Revision plan with human approval | Not started |
 | 7 | Supervisor and persisted sessions | Not started |

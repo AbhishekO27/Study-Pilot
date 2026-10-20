@@ -17,3 +17,6 @@ chromadb>=0.5
 
 # Phase 3 — the same Q&A steps drawn as a LangGraph (state, nodes, edges).
 langgraph>=0.2
+
+# Phase 4 — structured grader output, plus the quiz and plan schemas.
+pydantic>=2

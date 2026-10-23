@@ -1,4 +1,4 @@
-"""Quiz grading and weak-topic counts. No Gemini and no vector index."""
+"""Quiz grading and weak-topic counts. No API key and no vector index."""
 
 from studypilot.models.schemas import AnswerGrade, QuizQuestion
 from studypilot.quiz import (

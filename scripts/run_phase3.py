@@ -4,8 +4,8 @@
     python scripts/run_phase3.py "What are the Coffman conditions?"
 
 Q&A questions need the Phase 2 index. If chroma_db/ is missing, this script
-builds it from data/sample/os_lecture_notes.pdf (no Gemini call for that step).
-The answer step does call Gemini. A quiz-shaped question calls Gemini too
+builds it from data/sample/os_lecture_notes.pdf (no model call for that step).
+The answer step does call the model. A quiz-shaped question calls the model too
 (Phase 5 writes one multiple-choice question). A planning question is still
 the Phase 6 stub and does not call the model.
 """

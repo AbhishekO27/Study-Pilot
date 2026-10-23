@@ -116,7 +116,7 @@ def format_sources(chunks: list[dict]) -> str:
 
 
 def _message_text(message: object) -> str:
-    """Gemini 3 puts text in blocks; a normal AIMessage stores a string.
+    """Some replies put text in blocks; a normal AIMessage stores a string.
 
     .text flattens the blocks. Tests build a plain AIMessage, whose .text
     is the same string as .content.
@@ -131,7 +131,7 @@ def _message_text(message: object) -> str:
 
 
 def grade_with_model(state: StudyState, chat_model=None) -> GradeResult:
-    """Ask Gemini for a GradeResult. The schema rejects a free-form paragraph."""
+    """Ask the model for a GradeResult. The schema rejects a free-form paragraph."""
     chunks = state.get("chunks") or []
     prompt = (
         "You grade a study assistant. The answer may only use the excerpts.\n"
@@ -162,7 +162,7 @@ def grade_with_model(state: StudyState, chat_model=None) -> GradeResult:
 
 
 def write_quiz_with_model(state: StudyState, chat_model=None) -> QuizQuestion | None:
-    """Ask Gemini for one QuizQuestion. A bad payload becomes None, not a crash."""
+    """Ask the model for one QuizQuestion. A bad payload becomes None, not a crash."""
     chunks = state.get("chunks") or []
     prompt = (
         "Write one multiple-choice study question that can be answered from the excerpts only.\n"

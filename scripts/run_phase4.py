@@ -5,7 +5,7 @@
 
 The second demo question is about Paris. The nearest PDF chunks are still
 operating-systems notes, so the grader should reject the answer and, after
-two retries, return the fallback sentence. That path calls Gemini.
+two retries, return the fallback sentence. That path calls the model.
 """
 
 from __future__ import annotations

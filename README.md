@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 5 — a quiz request retrieves pages, Gemini writes one multiple-choice question, and missed topics are counted in memory.** Revision planning is still a stub. The weak-topic list lasts for one process run. The UI is not built.
+**Current phase: 5 — a quiz request retrieves pages, the model writes one multiple-choice question, and missed topics are counted in memory.** Revision planning is still a stub. The weak-topic list lasts for one process run. The UI is not built.
 
 ## Learning goals
 
@@ -21,7 +21,7 @@ This repository is built one phase at a time so each piece can be explained in a
 | --- | --- |
 | Language | Python 3.11 |
 | Agent framework | LangGraph + LangChain (from Phase 1 onward) |
-| LLM | Gemini free tier, via `.env` |
+| LLM | OpenAI, via `.env` (`gpt-4o-mini` by default) |
 | Vector store | Chroma (Phase 2) |
 | Persistence | SQLite (later phases) |
 | UI | Streamlit (Phase 9) |
@@ -39,13 +39,13 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Open `.env` and paste a key from [Google AI Studio](https://aistudio.google.com/apikey). Leave `GEMINI_MODEL` as `gemini-3.8-flash` unless you have a reason to change it.
+Open `.env` and paste a key from [OpenAI API keys](https://platform.openai.com/api-keys). Leave `OPENAI_MODEL` as `gpt-4o-mini` unless you have a reason to change it.
 
 ```powershell
 python scripts/check_setup.py
 ```
 
-A passing run prints the Python version, the package version, and `GEMINI_API_KEY: set (value hidden)`. It does not call the API.
+A passing run prints the Python version, the package version, and `OPENAI_API_KEY: set (value hidden)`. It does not call the API.
 
 ## Run the Phase 1 agent
 
@@ -61,7 +61,7 @@ The loop lives in `studypilot/agents/simple_agent.py` and is about 60 lines. Rea
 
 ## Run the Phase 2 RAG pipeline
 
-No Gemini key is required. First ingest downloads a small local embedding model (~80MB) into the Chroma cache.
+No API key is required. First ingest downloads a small local embedding model (~80MB) into the Chroma cache.
 
 ```powershell
 pip install -r requirements.txt
@@ -76,7 +76,7 @@ If you edit the sample PDF, rebuild it with `python scripts/make_sample_pdf.py`.
 
 ## Run the Phase 3 graph
 
-Q&A calls Gemini. A quiz-shaped question does too, as of Phase 5. A planning question still hits the Phase 6 stub and does not call the model.
+Q&A calls OpenAI. A quiz-shaped question does too, as of Phase 5. A planning question still hits the Phase 6 stub and does not call the model.
 
 ```powershell
 python scripts/run_phase3.py
@@ -90,7 +90,7 @@ The Phase 1 loop is still there (`python scripts/run_phase1.py`). Phase 3 does n
 
 ## Run the Phase 4 grader
 
-Q&A now calls Gemini twice per attempt: once to draft, once to grade. A grade of "not supported" searches again, up to two extra times. If the notes still do not support an answer, you get `I couldn't find this in your material.`
+Q&A now calls the model twice per attempt: once to draft, once to grade. A grade of "not supported" searches again, up to two extra times. If the notes still do not support an answer, you get `I couldn't find this in your material.`
 
 ```powershell
 python scripts/run_phase4.py
@@ -103,7 +103,7 @@ Quiz questions, answer grades, and revision plans are Pydantic models in `studyp
 
 ## Run the Phase 5 quiz
 
-One Gemini call writes the question. The two demo replies are graded locally, from `correct_index`.
+One model call writes the question. The two demo replies are graded locally, from `correct_index`.
 
 ```powershell
 python scripts/run_phase5.py
@@ -127,7 +127,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ```
 studypilot/     importable package (agents, graph, tools, rag, models, quiz, ui)
-  llm.py        builds the Gemini chat model from .env
+  llm.py        builds the OpenAI chat model from .env
 studypilot/rag/ load, chunk, embed, retrieve
 studypilot/graph/  LangGraph Q&A, grader retry, and quiz generation
 studypilot/models/ Pydantic schemas (grade, quiz, plan)

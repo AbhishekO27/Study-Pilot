@@ -1,8 +1,8 @@
 """Structured outputs. The model must fill these fields; it cannot add new ones.
 
-Phase 4 uses GradeResult in the graph. Phase 5 asks Gemini to fill
+Phase 4 uses GradeResult in the graph. Phase 5 asks the model to fill
 QuizQuestion. AnswerGrade is filled in code from correct_index, not by the
-model. RevisionPlan is the contract Phase 6 will ask Gemini to fill.
+model. RevisionPlan is the contract Phase 6 will ask the model to fill.
 """
 
 from __future__ import annotations

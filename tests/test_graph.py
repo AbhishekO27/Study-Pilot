@@ -1,4 +1,4 @@
-"""The Q&A graph, without Gemini and without downloading an embedding model."""
+"""The Q&A graph, without an API key and without downloading an embedding model."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class KeywordEmbeddings(Embeddings):
 
 
 class FakeModel:
-    """Stands in for Gemini. Records whether the answer node called it."""
+    """Stands in for the chat model. Records whether the answer node called it."""
 
     def __init__(self) -> None:
         self.calls = 0

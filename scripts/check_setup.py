@@ -1,4 +1,4 @@
-"""Check that this machine can run StudyPilot. Does not call the Gemini API."""
+"""Check that this machine can run StudyPilot. Does not call the OpenAI API."""
 
 from __future__ import annotations
 
@@ -49,21 +49,21 @@ def main() -> int:
 
     # load_dotenv reads the file into the process environment. We never print the key.
     load_dotenv(env_path)
-    key = os.getenv("GEMINI_API_KEY", "").strip()
+    key = os.getenv("OPENAI_API_KEY", "").strip()
     if key.lower() in PLACEHOLDER_KEYS:
-        print("GEMINI_API_KEY: missing")
-        print("Paste a key from https://aistudio.google.com/apikey into .env")
+        print("OPENAI_API_KEY: missing")
+        print("Paste a key from https://platform.openai.com/api-keys into .env")
         print("No API call was made.")
         return 1
 
-    model = os.getenv("GEMINI_MODEL", "").strip()
+    model = os.getenv("OPENAI_MODEL", "").strip()
     if not model:
-        print("GEMINI_MODEL: missing")
-        print("Set GEMINI_MODEL in .env. The example uses gemini-3.8-flash.")
+        print("OPENAI_MODEL: missing")
+        print("Set OPENAI_MODEL in .env. The example uses gpt-4o-mini.")
         return 1
 
-    print("GEMINI_API_KEY: set (value hidden)")
-    print(f"GEMINI_MODEL: {model}")
+    print("OPENAI_API_KEY: set (value hidden)")
+    print(f"OPENAI_MODEL: {model}")
     print("Setup check passed. No API call was made.")
     return 0
 

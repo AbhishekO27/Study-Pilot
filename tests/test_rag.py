@@ -1,4 +1,4 @@
-"""Offline RAG tests. No Gemini key and no embedding-model download."""
+"""Offline RAG tests. No API key and no embedding-model download."""
 
 from __future__ import annotations
 

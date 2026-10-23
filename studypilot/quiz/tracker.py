@@ -1,6 +1,6 @@
 """Grade a quiz question and remember which topics are weak.
 
-Generating the question needs Gemini, because the wording has to come from
+Generating the question needs the chat model, because the wording has to come from
 the retrieved pages. Grading it does not. QuizQuestion already stores
 correct_index, so the score is a comparison, not another model call. A
 second call could disagree with the question.

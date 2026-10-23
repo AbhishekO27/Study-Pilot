@@ -3,7 +3,7 @@
     python scripts/run_phase5.py
     python scripts/run_phase5.py "Quiz me on round robin"
 
-Writing the question calls Gemini. Grading does not: the correct choice is
+Writing the question calls the model. Grading does not: the correct choice is
 already on the question, so the score is a comparison.
 
 The demo submits a wrong choice, then the right one. After that tie the

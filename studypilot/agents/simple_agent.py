@@ -50,7 +50,7 @@ def run_tool(tool_call: dict) -> ToolMessage:
 
     tool_call looks like: {"name": "calculator", "args": {"expression": "17*23"}, "id": "..."}
 
-    Gemini requires a ToolMessage for every tool call it made, so even
+    The model expects a ToolMessage for every tool call it made, so even
     failures must come back as a ToolMessage (with the error text), never as
     a raised exception.
     """
@@ -76,7 +76,7 @@ def run_agent(
     verbose: bool = True,
 ) -> str:
     """Answer a question, calling tools as needed. Returns the final text."""
-    # bind_tools tells Gemini which functions exist and what arguments they
+    # bind_tools tells the model which functions exist and what arguments they
     # take (from the @tool docstrings and type hints). It does not run them.
     model = get_chat_model().bind_tools(TOOLS)
 
@@ -91,9 +91,9 @@ def run_agent(
 
         ai_msg: AIMessage = model.invoke(messages)
 
-        # Append the exact object Gemini returned. Gemini 3 hides a "thought
-        # signature" inside it; a rebuilt AIMessage would drop that and the
-        # next request would fail with a 400.
+        # Append the original AIMessage. It carries the tool-call ids.
+        # A rebuilt message without those ids makes the following
+        # ToolMessage invalid, and the next request fails.
         messages.append(ai_msg)
 
         if not ai_msg.tool_calls:

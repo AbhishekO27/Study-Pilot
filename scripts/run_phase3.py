@@ -1,11 +1,13 @@
-"""Run the Phase 3 LangGraph on demo questions, or on one you pass in.
+"""Run the LangGraph on demo questions, or on one you pass in.
 
     python scripts/run_phase3.py
     python scripts/run_phase3.py "What are the Coffman conditions?"
 
 Q&A questions need the Phase 2 index. If chroma_db/ is missing, this script
 builds it from data/sample/os_lecture_notes.pdf (no Gemini call for that step).
-The answer step does call Gemini.
+The answer step does call Gemini. A quiz-shaped question calls Gemini too
+(Phase 5 writes one multiple-choice question). A planning question is still
+the Phase 6 stub and does not call the model.
 """
 
 from __future__ import annotations

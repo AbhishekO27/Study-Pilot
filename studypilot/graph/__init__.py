@@ -1,4 +1,4 @@
-"""LangGraph graphs. The Q&A graph arrives in Phase 3."""
+"""LangGraph graphs. One graph answers questions, grades them, and writes quizzes."""
 
 from studypilot.graph.qa_graph import StudyState, build_qa_graph, run_qa
 

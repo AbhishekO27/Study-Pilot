@@ -1,4 +1,4 @@
-"""The Phase 3 graph, without Gemini and without downloading an embedding model."""
+"""The Q&A graph, without Gemini and without downloading an embedding model."""
 
 from __future__ import annotations
 
@@ -11,10 +11,12 @@ from langchain_core.messages import AIMessage
 from studypilot.graph.qa_graph import (
     FALLBACK,
     MAX_GRAPH_STEPS,
+    QUIZ_FALLBACK,
     build_qa_graph,
     classify_question,
+    write_quiz_with_model,
 )
-from studypilot.models.schemas import GradeResult
+from studypilot.models.schemas import GradeResult, QuizQuestion
 from studypilot.rag.store import ingest_documents
 
 _KEYWORDS = ("deadlock", "coffman", "quantum", "amdahl", "thread")
@@ -149,20 +151,151 @@ def test_empty_index_skips_the_model(tmp_path: Path) -> None:
     assert state["answer"] == FALLBACK
 
 
-def test_quiz_and_plan_do_not_retrieve_or_call_the_model(tmp_path: Path) -> None:
+def _quiz_question(**overrides) -> QuizQuestion:
+    fields = {
+        "topic": "deadlock",
+        "question": "How many Coffman conditions are there?",
+        "choices": ["Two", "Four"],
+        "correct_index": 1,
+        "source": "os.pdf",
+        "page": 5,
+    }
+    fields.update(overrides)
+    return QuizQuestion(**fields)
+
+
+def test_plan_does_not_retrieve_or_call_the_model(tmp_path: Path) -> None:
     persist, embeddings = _index(tmp_path)
     model = FakeModel()
     graph = build_qa_graph(persist_directory=persist, embeddings=embeddings, chat_model=model)
 
-    quiz = _run(graph, "Quiz me on deadlock")
     plan = _run(graph, "What should I study before my exam date?")
 
-    assert quiz["route"] == "quiz"
-    assert "Phase 5" in quiz["answer"]
-    assert quiz["chunks"] == []
     assert plan["route"] == "plan"
     assert "Phase 6" in plan["answer"]
+    assert plan["chunks"] == []
     assert model.calls == 0
+
+
+def test_quiz_retrieves_and_hides_the_correct_index(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    model = FakeModel()
+    written = _quiz_question()
+    seen: dict = {}
+
+    def writer(state: dict) -> QuizQuestion:
+        seen["chunks"] = state["chunks"]
+        return written
+
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=model,
+        quiz_writer=writer,
+    )
+
+    state = _run(graph, "Quiz me on deadlock")
+
+    assert state["route"] == "quiz"
+    assert state["search_query"] == "deadlock"
+    assert seen["chunks"][0]["page"] == 5
+    assert model.calls == 0
+    assert "0. Two" in state["answer"]
+    assert "1. Four" in state["answer"]
+    assert "correct_index" not in state["answer"]
+    assert "Topic: deadlock" in state["answer"]
+    assert state["quiz_question"]["correct_index"] == 1
+    assert state["quiz_question"]["page"] == 5
+
+
+def test_ungrounded_quiz_is_dropped(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=FakeModel(),
+        quiz_writer=lambda _state: _quiz_question(page=9),
+    )
+
+    state = _run(graph, "Quiz me on deadlock")
+
+    assert state["chunks"]
+    assert state["answer"] == QUIZ_FALLBACK
+    assert state["quiz_question"] == {}
+
+
+def test_quiz_on_an_empty_index_skips_the_writer(tmp_path: Path) -> None:
+    persist = tmp_path / "empty"
+    persist.mkdir()
+    calls: list[dict] = []
+
+    def writer(state: dict) -> QuizQuestion:
+        calls.append(state)
+        return _quiz_question()
+
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=KeywordEmbeddings(),
+        chat_model=FakeModel(),
+        quiz_writer=writer,
+    )
+
+    state = _run(graph, "Quiz me on deadlock")
+
+    assert calls == []
+    assert state["answer"] == FALLBACK
+    assert state["quiz_question"] == {}
+
+
+class FakeStructuredModel:
+    """Stands in for with_structured_output. invoke returns whatever we stored."""
+
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.schema = None
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema):
+        self.schema = schema
+        return self
+
+    def invoke(self, messages):
+        self.prompts.append(messages[-1].content)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def test_write_quiz_with_model_asks_for_the_schema() -> None:
+    question = _quiz_question()
+    model = FakeStructuredModel(question)
+    state = {
+        "question": "Quiz me on deadlock",
+        "chunks": [
+            {
+                "text": "A deadlock needs the four Coffman conditions.",
+                "source": "os.pdf",
+                "page": 5,
+            }
+        ],
+    }
+
+    got = write_quiz_with_model(state, chat_model=model)
+
+    assert got == question
+    assert model.schema is QuizQuestion
+    assert "os.pdf, page 5" in model.prompts[0]
+    assert "A deadlock needs the four Coffman conditions." in model.prompts[0]
+
+
+def test_write_quiz_with_model_drops_a_bad_payload() -> None:
+    state = {"question": "Quiz me", "chunks": [{"text": "x", "source": "os.pdf", "page": 5}]}
+
+    assert write_quiz_with_model(state, chat_model=FakeStructuredModel({"topic": "nope"})) is None
+    assert (
+        write_quiz_with_model(state, chat_model=FakeStructuredModel(RuntimeError("bad json")))
+        is None
+    )
 
 
 def test_grader_retries_once_then_accepts(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 4 — the Q&A graph grades its own answer and retries retrieval at most twice.** Quiz and revision planning have Pydantic schemas, but those features are not built yet. The UI is not built.
+**Current phase: 5 — a quiz request retrieves pages, Gemini writes one multiple-choice question, and missed topics are counted in memory.** Revision planning is still a stub. The weak-topic list lasts for one process run. The UI is not built.
 
 ## Learning goals
 
@@ -76,7 +76,7 @@ If you edit the sample PDF, rebuild it with `python scripts/make_sample_pdf.py`.
 
 ## Run the Phase 3 graph
 
-Q&A calls Gemini. Quiz and planning questions do not: the router sends them to a stub that names the later phase.
+Q&A calls Gemini. A quiz-shaped question does too, as of Phase 5. A planning question still hits the Phase 6 stub and does not call the model.
 
 ```powershell
 python scripts/run_phase3.py
@@ -84,7 +84,7 @@ python scripts/run_phase3.py "What are the Coffman conditions for deadlock?"
 pytest
 ```
 
-If `chroma_db/` is missing, the script indexes `os_lecture_notes.pdf` first. The graph is `studypilot/graph/qa_graph.py`: `route`, then `retrieve`, then `answer`. A quiz-shaped question skips retrieval.
+If `chroma_db/` is missing, the script indexes `os_lecture_notes.pdf` first. The graph is `studypilot/graph/qa_graph.py`. A normal question goes `route`, `retrieve`, `answer`, `grade`. A quiz-shaped question goes `route`, `retrieve`, `make_quiz`. A plan-shaped question stops at the stub.
 
 The Phase 1 loop is still there (`python scripts/run_phase1.py`). Phase 3 does not replace it. It is the same idea with the branch written as an edge.
 
@@ -99,7 +99,21 @@ pytest
 
 The demo asks a deadlock question, then asks for the capital of France. The second one should give up, because that fact is not in the sample PDF. `RETRIES` and `GRADE` print above the answer.
 
-Quiz questions, answer grades, and revision plans are Pydantic models in `studypilot/models/schemas.py`. The graph does not generate them yet.
+Quiz questions, answer grades, and revision plans are Pydantic models in `studypilot/models/schemas.py`. Phase 5 fills `QuizQuestion` from the model. `AnswerGrade` is filled in code. `RevisionPlan` is still unused.
+
+## Run the Phase 5 quiz
+
+One Gemini call writes the question. The two demo replies are graded locally, from `correct_index`.
+
+```powershell
+python scripts/run_phase5.py
+python scripts/run_phase5.py "Quiz me on round robin"
+pytest
+```
+
+The question is printed without the correct choice. The script then submits a wrong choice and the right one. A topic is weak while misses are at least as common as correct answers, so that tie stays on the list. Counts live on a `WeakTopicTracker` in memory. They are not written to disk.
+
+`make_quiz` drops a question whose source and page are not in the retrieved chunks, and the answer string never includes `correct_index`. Grading is `studypilot/quiz/tracker.py`.
 
 `docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
 
@@ -112,16 +126,17 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ## Layout
 
 ```
-studypilot/     importable package (agents, graph, tools, rag, models, ui)
+studypilot/     importable package (agents, graph, tools, rag, models, quiz, ui)
   llm.py        builds the Gemini chat model from .env
 studypilot/rag/ load, chunk, embed, retrieve
+studypilot/graph/  LangGraph Q&A, grader retry, and quiz generation
+studypilot/models/ Pydantic schemas (grade, quiz, plan)
+studypilot/quiz/   grade a choice and track weak topics in memory
 data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
 evals/          accuracy scripts, added in Phase 8
 docs/           local learning notes (not tracked)
 tests/          pytest, offline
-studypilot/graph/  LangGraph Q&A with a grader retry
-studypilot/models/ Pydantic schemas (grade, quiz, plan)
-scripts/        check_setup.py, run_phase1.py, run_phase2.py, run_phase3.py, run_phase4.py, make_sample_pdf.py
+scripts/        check_setup.py, run_phase1.py through run_phase5.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -135,7 +150,7 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | 2 | RAG pipeline | Done |
 | 3 | LangGraph Q&A graph | Done |
 | 4 | Grader, structured outputs, fallback | Done |
-| 5 | Quiz and weak-topic tracking | Not started |
+| 5 | Quiz and weak-topic tracking | Done |
 | 6 | Revision plan with human approval | Not started |
 | 7 | Supervisor and persisted sessions | Not started |
 | 8 | Evaluation numbers | Not started |

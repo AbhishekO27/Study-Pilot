@@ -1,6 +1,7 @@
-"""Q&A as a LangGraph, with a grader that can retry retrieval, plus a quiz branch.
+"""Q&A as a LangGraph, with a grader that can retry retrieval, plus quiz and plan branches.
 
-    START -> route --plan--> plan --> END
+    START -> route --plan--> draft_plan --ready--> review --> END
+                   |                    --missing--> END
                    --qa or quiz--> retrieve
                          retrieve --qa--> answer -> grade --accept--> END
                                                           --retry--> retrieve
@@ -18,6 +19,12 @@ Phase 5 uses the same retrieve node for a quiz, then make_quiz instead of
 answer. make_quiz writes one multiple-choice question. It does not grade
 the student. Grading happens afterwards, in studypilot.quiz, so the
 correct choice is never sent back to the model.
+
+Phase 6 does not retrieve. A revision plan is scheduled from weak topics
+the quiz tracker already recorded, and from an exam date in the question.
+draft_plan writes the schedule. review calls interrupt() and waits.
+The model call stays in draft_plan: resume restarts review, and a second
+model call would write a different plan from the one the student just saw.
 """
 
 from __future__ import annotations
@@ -26,16 +33,25 @@ from typing import Callable, Literal, TypedDict
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 from pydantic import ValidationError
 
 from studypilot.llm import get_chat_model
-from studypilot.models.schemas import GradeResult, QuizQuestion
+from studypilot.models.schemas import GradeResult, QuizQuestion, RevisionPlan
+from studypilot.plan import (
+    decision_approves,
+    exam_date_from_question,
+    format_plan,
+    prepare_plan,
+)
 from studypilot.quiz import format_quiz, question_is_grounded, quiz_search_query
 from studypilot.rag.store import DEFAULT_PERSIST_DIR, retrieve
 
 Route = Literal["qa", "quiz", "plan"]
 GradeAction = Literal["accept", "retry", "give_up"]
 AfterRetrieve = Literal["answer", "make_quiz"]
+AfterPlan = Literal["review", "end"]
+PlanStatus = Literal["", "pending", "approved", "declined", "unavailable"]
 
 # First answer, plus two retries, is three trips through retrieve/answer/grade,
 # after the route node. 20 leaves room so a bug fails on the retry counter
@@ -50,6 +66,11 @@ FALLBACK = "I couldn't find this in your material."
 # Chunks were found, but the model did not return a question that cites one of them.
 QUIZ_FALLBACK = "I couldn't write a quiz question from your material."
 
+PLAN_NEEDS_TOPICS = "Take a quiz first. I build the revision plan from topics you missed."
+PLAN_NEEDS_DATE = "Include the exam date as YYYY-MM-DD."
+PLAN_FALLBACK = "I couldn't make a revision plan from your weak topics."
+PLAN_DECLINED = "Plan declined. Nothing was saved."
+
 # Checked in this order. "quiz me on my revision schedule" is a quiz.
 _QUIZ_HINTS = ("quiz", "test me", "practice question", "flashcard")
 _PLAN_HINTS = ("study plan", "revision", "exam date", "what should i study")
@@ -57,6 +78,7 @@ _PLAN_HINTS = ("study plan", "revision", "exam date", "what should i study")
 # Tests pass functions with these shapes so the graph needs no API key.
 Grader = Callable[["StudyState"], GradeResult]
 QuizWriter = Callable[["StudyState"], QuizQuestion | None]
+PlanWriter = Callable[["StudyState"], RevisionPlan | None]
 
 
 class StudyState(TypedDict, total=False):
@@ -78,13 +100,17 @@ class StudyState(TypedDict, total=False):
     # model_dump() of a QuizQuestion, or {} when this turn has no question.
     # The correct index lives here. The answer string does not include it.
     quiz_question: dict
+    # Topics the quiz tracker currently calls weak. The plan may not add others.
+    weak_topics: list[str]
+    # model_dump() of a RevisionPlan, or {} when this turn has no schedule.
+    revision_plan: dict
+    plan_status: PlanStatus
 
 
 def classify_question(question: str) -> Route:
     """Pick a route from the wording. No model call, so the branch is testable.
 
-    Plan is still a stub until Phase 6. An LLM router belongs with the
-    Phase 7 supervisor.
+    An LLM router belongs with the Phase 7 supervisor.
     """
     text = question.lower()
     if any(hint in text for hint in _QUIZ_HINTS):
@@ -188,12 +214,42 @@ def write_quiz_with_model(state: StudyState, chat_model=None) -> QuizQuestion | 
         return None
 
 
+def write_plan_with_model(state: StudyState, chat_model=None) -> RevisionPlan | None:
+    """Ask the model for one RevisionPlan. A bad payload becomes None, not a crash."""
+    weak = [topic.strip() for topic in (state.get("weak_topics") or []) if topic.strip()]
+    exam_date = exam_date_from_question(state["question"])
+    topics = "\n".join(f"- {topic}" for topic in weak)
+    prompt = (
+        "Write a revision plan for a student.\n"
+        "Use only the topics listed under Weak topics. Do not add topics.\n"
+        "Each item needs a topic, a one-sentence why, and minutes from 1 to 180.\n"
+        "exam_date must be copied exactly from the exam date line.\n\n"
+        f"Student request: {state['question']}\n"
+        f"Exam date: {exam_date}\n"
+        f"Weak topics:\n{topics}"
+    )
+    model = chat_model if chat_model is not None else get_chat_model()
+    structured = model.with_structured_output(RevisionPlan)
+    try:
+        result = structured.invoke([HumanMessage(content=prompt)])
+    except Exception:  # noqa: BLE001 - a bad plan must not kill the graph
+        return None
+    if isinstance(result, RevisionPlan):
+        return result
+    try:
+        return RevisionPlan.model_validate(result)
+    except (ValidationError, TypeError, ValueError):
+        return None
+
+
 def build_qa_graph(
     persist_directory=DEFAULT_PERSIST_DIR,
     embeddings=None,
     chat_model=None,
     grader: Grader | None = None,
     quiz_writer: QuizWriter | None = None,
+    plan_writer: PlanWriter | None = None,
+    checkpointer=None,
 ):
     """Compile the graph. Tests pass a fake model, a fake grader, and a temp index."""
 
@@ -297,13 +353,58 @@ def build_qa_graph(
 
         return {"answer": format_quiz(question), "quiz_question": question.model_dump()}
 
-    def plan_node(state: StudyState) -> dict:
+    def draft_plan_node(state: StudyState) -> dict:
+        # Topics come from the quiz tracker, and the date comes from the
+        # question. Calling the model without either would invent a timetable.
+        weak = [topic.strip() for topic in (state.get("weak_topics") or []) if topic.strip()]
+        if not weak:
+            return {
+                "answer": PLAN_NEEDS_TOPICS,
+                "revision_plan": {},
+                "plan_status": "unavailable",
+            }
+        if exam_date_from_question(state["question"]) is None:
+            return {
+                "answer": PLAN_NEEDS_DATE,
+                "revision_plan": {},
+                "plan_status": "unavailable",
+            }
+
+        if plan_writer is not None:
+            drafted = plan_writer(state)
+        else:
+            drafted = write_plan_with_model(state, chat_model)
+        plan = prepare_plan(drafted, state["question"], weak)
+        if plan is None:
+            return {
+                "answer": PLAN_FALLBACK,
+                "revision_plan": {},
+                "plan_status": "unavailable",
+            }
         return {
-            "answer": (
-                "Revision planning is not built yet (Phase 6). "
-                "The router sent this question here because it looks like a planning request: "
-                f"{state['question']}"
-            )
+            "answer": format_plan(plan),
+            "revision_plan": plan.model_dump(),
+            "plan_status": "pending",
+        }
+
+    def review_node(state: StudyState) -> dict:
+        # interrupt() pauses the graph. On resume this node runs again from
+        # the top, and interrupt() returns the human's reply instead of pausing.
+        # The schedule was already written by draft_plan, so this restart is cheap.
+        decision = interrupt(
+            {
+                "kind": "revision_plan",
+                "question": "Approve this revision plan? Reply approve or decline.",
+                "plan": state.get("revision_plan") or {},
+                "preview": state.get("answer", ""),
+            }
+        )
+        if decision_approves(decision):
+            return {"plan_status": "approved"}
+        return {
+            "plan_status": "declined",
+            "answer": PLAN_DECLINED,
+            "revision_plan": {},
         }
 
     def choose_next(state: StudyState) -> Route:
@@ -312,6 +413,12 @@ def build_qa_graph(
     def choose_after_grade(state: StudyState) -> GradeAction:
         # accept and give_up both end the graph. retry is the backward edge.
         return state["grade_action"]
+
+    def choose_after_plan(state: StudyState) -> AfterPlan:
+        # An empty plan is a finished turn. A pending plan waits for the human.
+        if state.get("revision_plan"):
+            return "review"
+        return "end"
 
     def choose_after_retrieve(state: StudyState) -> AfterRetrieve:
         # qa and quiz share retrieve. The route decides which node consumes the chunks.
@@ -325,13 +432,14 @@ def build_qa_graph(
     graph.add_node("answer", answer_node)
     graph.add_node("grade", grade_node)
     graph.add_node("make_quiz", make_quiz_node)
-    graph.add_node("plan", plan_node)
+    graph.add_node("draft_plan", draft_plan_node)
+    graph.add_node("review", review_node)
 
     graph.add_edge(START, "route")
     graph.add_conditional_edges(
         "route",
         choose_next,
-        {"qa": "retrieve", "quiz": "retrieve", "plan": "plan"},
+        {"qa": "retrieve", "quiz": "retrieve", "plan": "draft_plan"},
     )
     graph.add_conditional_edges(
         "retrieve",
@@ -345,25 +453,50 @@ def build_qa_graph(
         {"accept": END, "give_up": END, "retry": "retrieve"},
     )
     graph.add_edge("make_quiz", END)
-    graph.add_edge("plan", END)
-    return graph.compile()
+    graph.add_conditional_edges(
+        "draft_plan",
+        choose_after_plan,
+        {"review": "review", "end": END},
+    )
+    graph.add_edge("review", END)
+    if checkpointer is None:
+        return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
-def run_qa(question: str) -> StudyState:
-    """Run one question through the graph. Returns the final state."""
-    app = build_qa_graph()
+def initial_state(question: str, weak_topics: list[str] | None = None) -> StudyState:
+    """The state for one new question. route is overwritten by the route node."""
+    return {
+        "question": question,
+        "search_query": "",
+        "route": "qa",
+        "chunks": [],
+        "draft": "",
+        "answer": "",
+        "retries": 0,
+        "grade_action": "accept",
+        "grade_reason": "",
+        "quiz_question": {},
+        "weak_topics": list(weak_topics or []),
+        "revision_plan": {},
+        "plan_status": "",
+    }
+
+
+def run_qa(question: str, weak_topics: list[str] | None = None) -> StudyState:
+    """Run one question through the graph. Returns the final state.
+
+    A planning question with weak topics and an exam date pauses inside review.
+    The returned state then contains __interrupt__. Resume that pause with the
+    same compiled graph; this helper builds a new one, so Phase 6 does not use it.
+    """
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    app = build_qa_graph(checkpointer=InMemorySaver())
     return app.invoke(
-        {
-            "question": question,
-            "search_query": "",
-            "route": "qa",
-            "chunks": [],
-            "draft": "",
-            "answer": "",
-            "retries": 0,
-            "grade_action": "accept",
-            "grade_reason": "",
-            "quiz_question": {},
+        initial_state(question, weak_topics),
+        config={
+            "recursion_limit": MAX_GRAPH_STEPS,
+            "configurable": {"thread_id": "studypilot"},
         },
-        config={"recursion_limit": MAX_GRAPH_STEPS},
     )

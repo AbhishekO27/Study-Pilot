@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 5 — a quiz request retrieves pages, the model writes one multiple-choice question, and missed topics are counted in memory.** Revision planning is still a stub. The weak-topic list lasts for one process run. The UI is not built.
+**Current phase: 6 — a planning request drafts a revision plan from weak topics and pauses until you approve or decline it.** The weak-topic list and the approved plan last for one process run. The UI is not built.
 
 ## Learning goals
 
@@ -76,7 +76,7 @@ If you edit the sample PDF, rebuild it with `python scripts/make_sample_pdf.py`.
 
 ## Run the Phase 3 graph
 
-Q&A calls OpenAI. A quiz-shaped question does too, as of Phase 5. A planning question still hits the Phase 6 stub and does not call the model.
+Q&A calls OpenAI. A quiz-shaped question does too, as of Phase 5. A planning question calls the model only when you pass weak topics and an exam date; approval is Phase 6.
 
 ```powershell
 python scripts/run_phase3.py
@@ -99,7 +99,7 @@ pytest
 
 The demo asks a deadlock question, then asks for the capital of France. The second one should give up, because that fact is not in the sample PDF. `RETRIES` and `GRADE` print above the answer.
 
-Quiz questions, answer grades, and revision plans are Pydantic models in `studypilot/models/schemas.py`. Phase 5 fills `QuizQuestion` from the model. `AnswerGrade` is filled in code. `RevisionPlan` is still unused.
+Quiz questions, answer grades, and revision plans are Pydantic models in `studypilot/models/schemas.py`. Phase 5 fills `QuizQuestion` from the model. `AnswerGrade` is filled in code. Phase 6 fills `RevisionPlan`, then drops any topic that is not on the weak-topic list.
 
 ## Run the Phase 5 quiz
 
@@ -115,6 +115,18 @@ The question is printed without the correct choice. The script then submits a wr
 
 `make_quiz` drops a question whose source and page are not in the retrieved chunks, and the answer string never includes `correct_index`. Grading is `studypilot/quiz/tracker.py`.
 
+## Run the Phase 6 revision plan
+
+One model call writes the schedule. The demo marks `deadlock` as a miss in memory, then pauses for your reply. `approve` keeps the plan. Anything else discards it. The exam date is taken from the question, not from the model.
+
+```powershell
+python scripts/run_phase6.py
+python scripts/run_phase6.py "Build a revision schedule before my exam date 2026-12-01."
+pytest
+```
+
+The plan route does not search the PDF. Topics come from the weak-topic list. A topic the model adds that you have not missed is removed before you see the schedule. The pause needs an in-memory checkpointer; the plan is still gone when the process exits.
+
 `docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
 
 If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once, then activate again:
@@ -129,14 +141,15 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 studypilot/     importable package (agents, graph, tools, rag, models, quiz, ui)
   llm.py        builds the OpenAI chat model from .env
 studypilot/rag/ load, chunk, embed, retrieve
-studypilot/graph/  LangGraph Q&A, grader retry, and quiz generation
+studypilot/graph/  LangGraph Q&A, grader retry, quiz generation, and plan approval
 studypilot/models/ Pydantic schemas (grade, quiz, plan)
 studypilot/quiz/   grade a choice and track weak topics in memory
+studypilot/plan/   keep weak topics and the exam date, then format the schedule
 data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
 evals/          accuracy scripts, added in Phase 8
 docs/           local learning notes (not tracked)
 tests/          pytest, offline
-scripts/        check_setup.py, run_phase1.py through run_phase5.py, make_sample_pdf.py
+scripts/        check_setup.py, run_phase1.py through run_phase6.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -151,7 +164,7 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | 3 | LangGraph Q&A graph | Done |
 | 4 | Grader, structured outputs, fallback | Done |
 | 5 | Quiz and weak-topic tracking | Done |
-| 6 | Revision plan with human approval | Not started |
+| 6 | Revision plan with human approval | Done |
 | 7 | Supervisor and persisted sessions | Not started |
 | 8 | Evaluation numbers | Not started |
 | 9 | Streamlit UI and README polish | Not started |

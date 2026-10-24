@@ -2,12 +2,15 @@
 
 Phase 4 uses GradeResult in the graph. Phase 5 asks the model to fill
 QuizQuestion. AnswerGrade is filled in code from correct_index, not by the
-model. RevisionPlan is the contract Phase 6 will ask the model to fill.
+model. Phase 6 asks the model to fill RevisionPlan, then Python keeps only
+the weak topics and the exam date from the question.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from datetime import date
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class GradeResult(BaseModel):
@@ -58,7 +61,16 @@ class PlanItem(BaseModel):
 
 
 class RevisionPlan(BaseModel):
-    """A schedule to approve later, in Phase 6. Not saved anywhere yet."""
+    """A schedule the student approves in Phase 6. Approval is not written to disk."""
 
     exam_date: str = Field(description="ISO date, YYYY-MM-DD.")
     items: list[PlanItem] = Field(min_length=1, max_length=14)
+
+    @field_validator("exam_date")
+    @classmethod
+    def exam_date_is_a_real_day(cls, value: str) -> str:
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("exam_date must be a real date in YYYY-MM-DD form") from exc
+        return value

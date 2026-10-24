@@ -6,8 +6,9 @@
 Q&A questions need the Phase 2 index. If chroma_db/ is missing, this script
 builds it from data/sample/os_lecture_notes.pdf (no model call for that step).
 The answer step does call the model. A quiz-shaped question calls the model too
-(Phase 5 writes one multiple-choice question). A planning question is still
-the Phase 6 stub and does not call the model.
+(Phase 5 writes one multiple-choice question). A planning question does not
+call the model unless weak topics and an exam date were passed in. Approval
+is scripts/run_phase6.py.
 """
 
 from __future__ import annotations
@@ -79,7 +80,11 @@ def main() -> int:
                 print(f"REASON: {state['grade_reason']}")
             for chunk in state.get("chunks") or []:
                 print(f"  retrieved {chunk['source']}, p. {chunk['page']}")
+        if state["route"] == "plan":
+            print(f"PLAN: {state.get('plan_status', '')}")
         print(f"\nANSWER:\n{state['answer']}\n")
+        if state.get("__interrupt__"):
+            print("This plan is waiting for approval. Run: python scripts/run_phase6.py\n")
     return 0
 
 

@@ -8,15 +8,24 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import AIMessage
 
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
+
 from studypilot.graph.qa_graph import (
     FALLBACK,
     MAX_GRAPH_STEPS,
+    PLAN_DECLINED,
+    PLAN_FALLBACK,
+    PLAN_NEEDS_DATE,
+    PLAN_NEEDS_TOPICS,
     QUIZ_FALLBACK,
     build_qa_graph,
     classify_question,
+    initial_state,
+    write_plan_with_model,
     write_quiz_with_model,
 )
-from studypilot.models.schemas import GradeResult, QuizQuestion
+from studypilot.models.schemas import GradeResult, PlanItem, QuizQuestion, RevisionPlan
 from studypilot.rag.store import ingest_documents
 
 _KEYWORDS = ("deadlock", "coffman", "quantum", "amdahl", "thread")
@@ -164,17 +173,66 @@ def _quiz_question(**overrides) -> QuizQuestion:
     return QuizQuestion(**fields)
 
 
-def test_plan_does_not_retrieve_or_call_the_model(tmp_path: Path) -> None:
+def _plan(**overrides) -> RevisionPlan:
+    fields = {
+        "exam_date": "2026-01-01",
+        "items": [
+            PlanItem(topic="deadlock", why="Missed on the quiz.", minutes=25),
+            PlanItem(topic="quantum physics", why="Not in the notes.", minutes=40),
+        ],
+    }
+    fields.update(overrides)
+    return RevisionPlan(**fields)
+
+
+def _run_saved(graph, question: str, weak_topics: list[str], thread_id: str) -> dict:
+    return graph.invoke(
+        initial_state(question, weak_topics),
+        config={
+            "recursion_limit": MAX_GRAPH_STEPS,
+            "configurable": {"thread_id": thread_id},
+        },
+    )
+
+
+def test_plan_without_weak_topics_skips_the_model(tmp_path: Path) -> None:
     persist, embeddings = _index(tmp_path)
     model = FakeModel()
     graph = build_qa_graph(persist_directory=persist, embeddings=embeddings, chat_model=model)
 
-    plan = _run(graph, "What should I study before my exam date?")
+    plan = _run(graph, "What should I study before my exam date 2026-12-01?")
 
     assert plan["route"] == "plan"
-    assert "Phase 6" in plan["answer"]
+    assert plan["answer"] == PLAN_NEEDS_TOPICS
+    assert plan["plan_status"] == "unavailable"
+    assert plan["revision_plan"] == {}
     assert plan["chunks"] == []
     assert model.calls == 0
+    assert "__interrupt__" not in plan
+
+
+def test_plan_without_a_date_skips_the_model(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    calls: list[dict] = []
+
+    def writer(state: dict) -> RevisionPlan:
+        calls.append(state)
+        return _plan()
+
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=FakeModel(),
+        plan_writer=writer,
+        checkpointer=InMemorySaver(),
+    )
+
+    plan = _run_saved(graph, "Build a revision schedule before my exam date.", ["deadlock"], "date")
+
+    assert calls == []
+    assert plan["answer"] == PLAN_NEEDS_DATE
+    assert plan["plan_status"] == "unavailable"
+    assert "__interrupt__" not in plan
 
 
 def test_quiz_retrieves_and_hides_the_correct_index(tmp_path: Path) -> None:
@@ -354,3 +412,124 @@ def test_grader_gives_up_after_two_retries(tmp_path: Path) -> None:
     assert state["grade_action"] == "give_up"
     assert state["answer"] == FALLBACK
     assert "Retrieved sources:" not in state["answer"]
+
+
+def test_plan_pauses_then_approve_keeps_only_weak_topics(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    model = FakeModel()
+    calls = {"n": 0}
+
+    def writer(_state: dict) -> RevisionPlan:
+        calls["n"] += 1
+        return _plan()
+
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=model,
+        plan_writer=writer,
+        checkpointer=InMemorySaver(),
+    )
+    question = "Build a revision schedule before my exam date 2026-12-01."
+
+    paused = _run_saved(graph, question, ["deadlock"], "approve")
+
+    assert paused["route"] == "plan"
+    assert paused["plan_status"] == "pending"
+    assert paused["revision_plan"]["exam_date"] == "2026-12-01"
+    assert [item["topic"] for item in paused["revision_plan"]["items"]] == ["deadlock"]
+    assert "quantum physics" not in paused["answer"]
+    assert paused["chunks"] == []
+    assert model.calls == 0
+    assert calls["n"] == 1
+    assert paused["__interrupt__"][0].value["kind"] == "revision_plan"
+
+    finished = graph.invoke(
+        Command(resume="approve"),
+        config={"recursion_limit": MAX_GRAPH_STEPS, "configurable": {"thread_id": "approve"}},
+    )
+
+    assert calls["n"] == 1
+    assert finished["plan_status"] == "approved"
+    assert "deadlock (25 min)" in finished["answer"]
+    assert finished["revision_plan"]["exam_date"] == "2026-12-01"
+    assert "__interrupt__" not in finished
+
+
+def test_plan_decline_discards_the_schedule(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=FakeModel(),
+        plan_writer=lambda _state: _plan(),
+        checkpointer=InMemorySaver(),
+    )
+    _run_saved(
+        graph,
+        "Build a revision schedule before my exam date 2026-12-01.",
+        ["deadlock"],
+        "decline",
+    )
+
+    finished = graph.invoke(
+        Command(resume="no"),
+        config={"recursion_limit": MAX_GRAPH_STEPS, "configurable": {"thread_id": "decline"}},
+    )
+
+    assert finished["plan_status"] == "declined"
+    assert finished["answer"] == PLAN_DECLINED
+    assert finished["revision_plan"] == {}
+
+
+def test_plan_writer_that_misses_every_topic_does_not_pause(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=FakeModel(),
+        plan_writer=lambda _state: _plan(
+            items=[PlanItem(topic="quantum physics", why="Not in the notes.", minutes=40)]
+        ),
+        checkpointer=InMemorySaver(),
+    )
+
+    state = _run_saved(
+        graph,
+        "Build a revision schedule before my exam date 2026-12-01.",
+        ["deadlock"],
+        "empty",
+    )
+
+    assert state["answer"] == PLAN_FALLBACK
+    assert state["plan_status"] == "unavailable"
+    assert "__interrupt__" not in state
+
+
+def test_write_plan_with_model_asks_for_the_schema() -> None:
+    plan = _plan(items=[PlanItem(topic="deadlock", why="Missed on the quiz.", minutes=25)])
+    model = FakeStructuredModel(plan)
+    state = {
+        "question": "Build a revision schedule before my exam date 2026-12-01.",
+        "weak_topics": ["deadlock"],
+    }
+
+    got = write_plan_with_model(state, chat_model=model)
+
+    assert got == plan
+    assert model.schema is RevisionPlan
+    assert "Exam date: 2026-12-01" in model.prompts[0]
+    assert "- deadlock" in model.prompts[0]
+
+
+def test_write_plan_with_model_drops_a_bad_payload() -> None:
+    state = {
+        "question": "Build a revision schedule before my exam date 2026-12-01.",
+        "weak_topics": ["deadlock"],
+    }
+
+    assert write_plan_with_model(state, chat_model=FakeStructuredModel({"items": []})) is None
+    assert (
+        write_plan_with_model(state, chat_model=FakeStructuredModel(RuntimeError("bad json")))
+        is None
+    )

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "coffman",
+    "question": "What are the four Coffman conditions for deadlock?",
+    "must_include": ["mutual exclusion", "hold and wait", "no preemption", "circular wait"],
+    "expect_refusal": false,
+    "source": "os_lecture_notes.pdf",
+    "page": 5
+  },
+  {
+    "id": "round-robin",
+    "question": "What is a time quantum in Round Robin scheduling?",
+    "must_include": ["quantum"],
+    "expect_refusal": false,
+    "source": "os_lecture_notes.pdf",
+    "page": 4
+  },
+  {
+    "id": "mutex",
+    "question": "What operations does a mutex provide?",
+    "must_include": ["acquire", "release"],
+    "expect_refusal": false,
+    "source": "os_lecture_notes.pdf",
+    "page": 6
+  },
+  {
+    "id": "france",
+    "question": "What is the capital of France?",
+    "must_include": [],
+    "expect_refusal": true,
+    "source": "",
+    "page": null
+  },
+  {
+    "id": "hamlet",
+    "question": "Who wrote Hamlet?",
+    "must_include": [],
+    "expect_refusal": true,
+    "source": "",
+    "page": null
+  }
+]

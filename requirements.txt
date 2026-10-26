@@ -24,3 +24,7 @@ langgraph-checkpoint-sqlite>=3.0
 
 # Phase 4 — structured grader output, plus the quiz and plan schemas.
 pydantic>=2
+
+# Phase 9 — the study page. Tracing uses the langsmith package already
+# installed with LangChain; it stays off until LANGSMITH_TRACING=true.
+streamlit>=1.33

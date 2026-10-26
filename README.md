@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 7 — a supervisor can choose the branch, and a SQLite session keeps weak topics and a paused plan after the process exits.** Keyword routing is still the default for the earlier scripts. The UI is not built.
+**Current phase: 9 — the study page runs the graph, and a fixed question set reports correctness, citation accuracy, and hallucination rate.** Keyword routing is still the default. LangSmith stays off until you turn it on in `.env`.
 
 ## Learning goals
 
@@ -24,8 +24,8 @@ This repository is built one phase at a time so each piece can be explained in a
 | LLM | OpenAI, via `.env` (`gpt-4o-mini` by default) |
 | Vector store | Chroma (Phase 2) |
 | Persistence | SQLite session file (Phase 7) |
-| UI | Streamlit (Phase 9) |
-| Tracing | LangSmith, optional (Phase 9) |
+| UI | Streamlit (`streamlit run studypilot/ui/app.py`) |
+| Tracing | LangSmith, off until `LANGSMITH_TRACING=true` |
 
 ## Setup (Windows, PowerShell)
 
@@ -84,7 +84,7 @@ python scripts/run_phase3.py "What are the Coffman conditions for deadlock?"
 pytest
 ```
 
-If `chroma_db/` is missing, the script indexes `os_lecture_notes.pdf` first. The graph is `studypilot/graph/qa_graph.py`. A normal question goes `route`, `retrieve`, `answer`, `grade`. A quiz-shaped question goes `route`, `retrieve`, `make_quiz`. A plan-shaped question stops at the stub.
+If `chroma_db/` is missing, the script indexes `os_lecture_notes.pdf` first. The graph is `studypilot/graph/qa_graph.py`. A normal question goes `route`, `retrieve`, `answer`, `grade`. A quiz-shaped question goes `route`, `retrieve`, `make_quiz`. A plan-shaped question drafts a schedule when weak topics and an exam date are available; otherwise it says what is missing.
 
 The Phase 1 loop is still there (`python scripts/run_phase1.py`). Phase 3 does not replace it. It is the same idea with the branch written as an edge.
 
@@ -139,6 +139,32 @@ pytest
 
 The first run saves one demo miss for `deadlock` when the file has no weak topics. Stop the script at the approval prompt, run it again, and it resumes that pause instead of drafting a second plan.
 
+## Run the Phase 8 evaluation
+
+Five fixed questions. Three should be answered from the sample PDF. Two are not in the notes, and the grounded answer is the refusal sentence. The script calls the model. `pytest` scores canned answers and does not.
+
+```powershell
+python scripts/run_phase8.py
+pytest
+```
+
+Correctness counts required phrases, or a correct refusal. Citation accuracy is only over the questions that should be answered, and it looks for `os_lecture_notes.pdf, p. N` in the answer. Hallucination rate is only over the questions that should be refused: any other sentence counts. A supported answer that misses a phrase is incorrect, and it is not called a hallucination. Retrieval hit rate is printed as a diagnostic so a bad citation can be traced to Chroma or to the draft.
+
+The case list is `evals/qa_cases.json`.
+
+## Run the Phase 9 page
+
+```powershell
+pip install -r requirements.txt
+streamlit run studypilot/ui/app.py
+```
+
+The page asks the same graph. A quiz hides the correct choice until you submit. Approve and decline continue a paused plan in `sessions/studypilot.sqlite`. "Let the model choose the route" turns on the supervisor for that question. Leave it off and the keyword rules are used.
+
+An uploaded PDF or text file is written to `data/uploads/` and indexed together with the sample notes. That folder is gitignored.
+
+LangSmith does not run unless `.env` sets `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY`. The sidebar says whether tracing is on.
+
 `docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
 
 If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once, then activate again:
@@ -158,11 +184,12 @@ studypilot/models/ Pydantic schemas (grade, quiz, plan, route)
 studypilot/quiz/   grade a choice and track weak topics in memory
 studypilot/plan/   keep weak topics and the exam date, then format the schedule
 studypilot/session/ SQLite weak topics, latest plan, and the graph checkpointer
+studypilot/ui/      Streamlit page (app.py) and the actions it calls (service.py)
 data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
-evals/          accuracy scripts, added in Phase 8
+evals/          qa_cases.json, the fixed questions Phase 8 scores
 docs/           local learning notes (not tracked)
 tests/          pytest, offline
-scripts/        check_setup.py, run_phase1.py through run_phase7.py, make_sample_pdf.py
+scripts/        check_setup.py, run_phase1.py through run_phase8.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -179,5 +206,5 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | 5 | Quiz and weak-topic tracking | Done |
 | 6 | Revision plan with human approval | Done |
 | 7 | Supervisor and persisted sessions | Done |
-| 8 | Evaluation numbers | Not started |
-| 9 | Streamlit UI and README polish | Not started |
+| 8 | Evaluation numbers | Done |
+| 9 | Streamlit UI and README polish | Done |

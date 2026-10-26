@@ -92,6 +92,56 @@ def _to_chunk(document: Document, score: float) -> RetrievedChunk:
     )
 
 
+def index_count(persist_directory: Path = DEFAULT_PERSIST_DIR) -> int:
+    """How many chunks are already stored. Zero when the folder or collection is missing."""
+    path = Path(persist_directory)
+    if not path.exists():
+        return 0
+    client = chromadb.PersistentClient(path=str(path))
+    names = {item.name for item in client.list_collections()}
+    if COLLECTION_NAME not in names:
+        return 0
+    return int(client.get_collection(COLLECTION_NAME).count())
+
+
+def ensure_sample_index(persist_directory: Path = DEFAULT_PERSIST_DIR) -> int:
+    """Build the sample lecture index when it is empty. Returns the chunk count."""
+    count = index_count(persist_directory)
+    if count > 0:
+        return count
+    from studypilot.rag.loader import load_file
+
+    sample = Path(__file__).resolve().parents[2] / "data" / "sample" / "os_lecture_notes.pdf"
+    if not sample.is_file():
+        raise FileNotFoundError(
+            f"Missing {sample}. Run: python scripts/make_sample_pdf.py"
+        )
+    return ingest_documents(load_file(sample), persist_directory=persist_directory, rebuild=True)
+
+
+def ingest_sample_and_uploads(
+    upload_dir: Path,
+    persist_directory: Path = DEFAULT_PERSIST_DIR,
+) -> int:
+    """Rebuild the index from the sample PDF plus every pdf/txt in upload_dir.
+
+    rebuild replaces the collection, so a second upload does not duplicate chunks.
+    The sample notes stay in the index together with the uploaded files.
+    """
+    from studypilot.rag.loader import SUPPORTED_SUFFIXES, load_file
+
+    documents: list[Document] = []
+    sample = Path(__file__).resolve().parents[2] / "data" / "sample" / "os_lecture_notes.pdf"
+    if sample.is_file():
+        documents.extend(load_file(sample))
+    upload_dir = Path(upload_dir)
+    if upload_dir.is_dir():
+        for path in sorted(upload_dir.iterdir()):
+            if path.suffix.lower() in SUPPORTED_SUFFIXES and path.is_file():
+                documents.extend(load_file(path))
+    return ingest_documents(documents, persist_directory=persist_directory, rebuild=True)
+
+
 def _delete_collection(persist_directory: Path) -> None:
     """Remove only our collection. Other Chroma data in the same folder is left alone."""
     client = chromadb.PersistentClient(path=str(persist_directory))

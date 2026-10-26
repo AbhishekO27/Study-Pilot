@@ -25,6 +25,11 @@ the quiz tracker already recorded, and from an exam date in the question.
 draft_plan writes the schedule. review calls interrupt() and waits.
 The model call stays in draft_plan: resume restarts review, and a second
 model call would write a different plan from the one the student just saw.
+
+Phase 7 can replace the keyword router with a supervisor. The default is
+still the keywords, so a test and the earlier scripts do not spend a model
+call on routing. Pass use_supervisor=True, or pass a router, to turn it on.
+A supervisor failure falls back to the keywords.
 """
 
 from __future__ import annotations
@@ -37,7 +42,7 @@ from langgraph.types import interrupt
 from pydantic import ValidationError
 
 from studypilot.llm import get_chat_model
-from studypilot.models.schemas import GradeResult, QuizQuestion, RevisionPlan
+from studypilot.models.schemas import GradeResult, QuizQuestion, RevisionPlan, RouteDecision
 from studypilot.plan import (
     decision_approves,
     exam_date_from_question,
@@ -79,6 +84,9 @@ _PLAN_HINTS = ("study plan", "revision", "exam date", "what should i study")
 Grader = Callable[["StudyState"], GradeResult]
 QuizWriter = Callable[["StudyState"], QuizQuestion | None]
 PlanWriter = Callable[["StudyState"], RevisionPlan | None]
+Router = Callable[["StudyState"], RouteDecision | None]
+
+_ROUTES = ("qa", "quiz", "plan")
 
 
 class StudyState(TypedDict, total=False):
@@ -105,12 +113,14 @@ class StudyState(TypedDict, total=False):
     # model_dump() of a RevisionPlan, or {} when this turn has no schedule.
     revision_plan: dict
     plan_status: PlanStatus
+    # Why this route was chosen. "keyword rules" means the supervisor was not used.
+    route_reason: str
 
 
 def classify_question(question: str) -> Route:
     """Pick a route from the wording. No model call, so the branch is testable.
 
-    An LLM router belongs with the Phase 7 supervisor.
+    This stays the fallback when the Phase 7 supervisor fails or is left off.
     """
     text = question.lower()
     if any(hint in text for hint in _QUIZ_HINTS):
@@ -242,6 +252,41 @@ def write_plan_with_model(state: StudyState, chat_model=None) -> RevisionPlan | 
         return None
 
 
+def route_with_model(state: StudyState, chat_model=None) -> RouteDecision | None:
+    """Ask the model which branch to run. A bad payload becomes None.
+
+    None tells the route node to use classify_question. The graph does not
+    stop because the supervisor failed.
+    """
+    prompt = (
+        "You route one request for a study assistant. Pick exactly one route.\n"
+        "qa: the student wants an explanation from their notes.\n"
+        "quiz: the student wants a practice question, even if they do not say 'quiz'.\n"
+        "plan: the student wants a revision schedule or names an exam date.\n"
+        "reason is one short sentence.\n\n"
+        f"Student request: {state['question']}"
+    )
+    try:
+        model = chat_model if chat_model is not None else get_chat_model()
+        structured = model.with_structured_output(RouteDecision)
+        result = structured.invoke([HumanMessage(content=prompt)])
+    except Exception:  # noqa: BLE001 - routing must fall back to the keywords
+        return None
+    if isinstance(result, RouteDecision):
+        return result
+    try:
+        return RouteDecision.model_validate(result)
+    except (ValidationError, TypeError, ValueError):
+        return None
+
+
+def _accepted_route(decision: object) -> Route | None:
+    route = getattr(decision, "route", None)
+    if route in _ROUTES:
+        return route
+    return None
+
+
 def build_qa_graph(
     persist_directory=DEFAULT_PERSIST_DIR,
     embeddings=None,
@@ -250,11 +295,31 @@ def build_qa_graph(
     quiz_writer: QuizWriter | None = None,
     plan_writer: PlanWriter | None = None,
     checkpointer=None,
+    router: Router | None = None,
+    use_supervisor: bool = False,
 ):
-    """Compile the graph. Tests pass a fake model, a fake grader, and a temp index."""
+    """Compile the graph. Tests pass a fake model, a fake grader, and a temp index.
+
+    use_supervisor asks the model to pick qa, quiz, or plan. The default is
+    the keyword router, which is what Phases 3 to 6 call.
+    """
 
     def route_node(state: StudyState) -> dict:
-        return {"route": classify_question(state["question"])}
+        decision = None
+        if router is not None:
+            try:
+                decision = router(state)
+            except Exception:  # noqa: BLE001 - a broken router falls back
+                decision = None
+        elif use_supervisor:
+            decision = route_with_model(state, chat_model)
+        route = _accepted_route(decision)
+        if route is None:
+            return {
+                "route": classify_question(state["question"]),
+                "route_reason": "keyword rules",
+            }
+        return {"route": route, "route_reason": getattr(decision, "reason", "") or ""}
 
     def retrieve_node(state: StudyState) -> dict:
         # search_query is set when the grader asks for another pass.
@@ -480,6 +545,7 @@ def initial_state(question: str, weak_topics: list[str] | None = None) -> StudyS
         "weak_topics": list(weak_topics or []),
         "revision_plan": {},
         "plan_status": "",
+        "route_reason": "",
     }
 
 

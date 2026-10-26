@@ -3,7 +3,14 @@
 import pytest
 from pydantic import ValidationError
 
-from studypilot.models.schemas import AnswerGrade, GradeResult, PlanItem, QuizQuestion, RevisionPlan
+from studypilot.models.schemas import (
+    AnswerGrade,
+    GradeResult,
+    PlanItem,
+    QuizQuestion,
+    RevisionPlan,
+    RouteDecision,
+)
 
 
 def test_grade_result_rewritten_query_defaults_to_empty() -> None:
@@ -26,6 +33,11 @@ def test_quiz_question_rejects_an_index_past_the_choices() -> None:
 def test_answer_grade_score_stays_between_zero_and_one() -> None:
     with pytest.raises(ValidationError):
         AnswerGrade(topic="deadlock", correct=False, score=1.5, feedback="Too high.")
+
+
+def test_route_decision_rejects_an_unknown_branch() -> None:
+    with pytest.raises(ValidationError):
+        RouteDecision(route="chat", reason="Not a study task.")
 
 
 def test_revision_plan_rejects_an_impossible_date() -> None:

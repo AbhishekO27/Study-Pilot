@@ -5,8 +5,8 @@ the retrieved pages. Grading it does not. QuizQuestion already stores
 correct_index, so the score is a comparison, not another model call. A
 second call could disagree with the question.
 
-The counts live on this object only. Nothing is written to disk. Phase 7
-is the one that saves a session.
+The counts live on this object. studypilot.session.SessionStore is what
+writes them to SQLite. This class does not open a database.
 """
 
 from __future__ import annotations
@@ -91,6 +91,14 @@ class WeakTopicTracker:
     def weak_topics(self) -> list[TopicStat]:
         weak = [stat for stat in self._stats.values() if stat.weak]
         return sorted(weak, key=lambda stat: stat.topic.casefold())
+
+    def stats(self) -> list[TopicStat]:
+        """Every topic, weak or not. SessionStore writes this list."""
+        return list(self._stats.values())
+
+    def restore(self, stats: list[TopicStat]) -> None:
+        """Replace the in-memory counts. Used when a session file is loaded."""
+        self._stats = {stat.topic.casefold(): stat for stat in stats}
 
 
 def quiz_search_query(question: str) -> str:

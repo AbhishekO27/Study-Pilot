@@ -6,6 +6,7 @@ from studypilot.models.schemas import (
     PlanItem,
     QuizQuestion,
     RevisionPlan,
+    RouteDecision,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "PlanItem",
     "QuizQuestion",
     "RevisionPlan",
+    "RouteDecision",
 ]

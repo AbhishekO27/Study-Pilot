@@ -17,5 +17,10 @@ chromadb>=0.5
 # Phase 3 — the same Q&A steps drawn as a LangGraph (state, nodes, edges).
 langgraph>=0.2
 
+# Phase 7 — SQLite checkpointer so a paused plan can resume in a new process.
+# The package also installs sqlite-vec for LangGraph's store. This project
+# does not use that vector store. Weak topics live in our own tables.
+langgraph-checkpoint-sqlite>=3.0
+
 # Phase 4 — structured grader output, plus the quiz and plan schemas.
 pydantic>=2

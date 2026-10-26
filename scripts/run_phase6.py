@@ -8,7 +8,7 @@ RevisionPlan. Python drops any topic that is not on that weak list and forces
 the exam date to the YYYY-MM-DD in the question. The graph then pauses.
 Type approve to keep the schedule, or decline to discard it.
 
-Nothing is written to disk. Phase 7 is the one that saves a session.
+Nothing is written to disk. scripts/run_phase7.py saves the session.
 """
 
 from __future__ import annotations

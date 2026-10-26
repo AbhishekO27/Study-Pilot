@@ -4,7 +4,7 @@ StudyPilot turns a student's lecture PDFs and notes into a study assistant: answ
 
 This repository is built one phase at a time so each piece can be explained in an interview.
 
-**Current phase: 6 — a planning request drafts a revision plan from weak topics and pauses until you approve or decline it.** The weak-topic list and the approved plan last for one process run. The UI is not built.
+**Current phase: 7 — a supervisor can choose the branch, and a SQLite session keeps weak topics and a paused plan after the process exits.** Keyword routing is still the default for the earlier scripts. The UI is not built.
 
 ## Learning goals
 
@@ -23,7 +23,7 @@ This repository is built one phase at a time so each piece can be explained in a
 | Agent framework | LangGraph + LangChain (from Phase 1 onward) |
 | LLM | OpenAI, via `.env` (`gpt-4o-mini` by default) |
 | Vector store | Chroma (Phase 2) |
-| Persistence | SQLite (later phases) |
+| Persistence | SQLite session file (Phase 7) |
 | UI | Streamlit (Phase 9) |
 | Tracing | LangSmith, optional (Phase 9) |
 
@@ -125,7 +125,19 @@ python scripts/run_phase6.py "Build a revision schedule before my exam date 2026
 pytest
 ```
 
-The plan route does not search the PDF. Topics come from the weak-topic list. A topic the model adds that you have not missed is removed before you see the schedule. The pause needs an in-memory checkpointer; the plan is still gone when the process exits.
+The plan route does not search the PDF. Topics come from the weak-topic list. A topic the model adds that you have not missed is removed before you see the schedule. The pause uses an in-memory checkpointer, so the plan is gone when the process exits. Phase 7 writes that pause to SQLite.
+
+## Run the Phase 7 session
+
+The supervisor picks `qa`, `quiz`, or `plan`. If that call fails, the keyword rules are used. Weak topics and the latest plan are rows in `sessions/studypilot.sqlite`. The same file holds the LangGraph checkpoint, so a plan you did not approve is still waiting the next time you start the script.
+
+```powershell
+python scripts/run_phase7.py
+python scripts/run_phase7.py "Build a revision schedule before my exam date 2026-12-01."
+pytest
+```
+
+The first run saves one demo miss for `deadlock` when the file has no weak topics. Stop the script at the approval prompt, run it again, and it resumes that pause instead of drafting a second plan.
 
 `docs/LEARNING_NOTES.md` and `docs/DESIGN_DECISIONS.md` are local only (listed in `.gitignore`). They are not part of the repo.
 
@@ -141,15 +153,16 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 studypilot/     importable package (agents, graph, tools, rag, models, quiz, ui)
   llm.py        builds the OpenAI chat model from .env
 studypilot/rag/ load, chunk, embed, retrieve
-studypilot/graph/  LangGraph Q&A, grader retry, quiz generation, and plan approval
-studypilot/models/ Pydantic schemas (grade, quiz, plan)
+studypilot/graph/  LangGraph Q&A, grader retry, quiz, plan approval, optional supervisor
+studypilot/models/ Pydantic schemas (grade, quiz, plan, route)
 studypilot/quiz/   grade a choice and track weak topics in memory
 studypilot/plan/   keep weak topics and the exam date, then format the schedule
+studypilot/session/ SQLite weak topics, latest plan, and the graph checkpointer
 data/sample/    study_notes.txt (Phase 1) and os_lecture_notes.pdf (Phase 2)
 evals/          accuracy scripts, added in Phase 8
 docs/           local learning notes (not tracked)
 tests/          pytest, offline
-scripts/        check_setup.py, run_phase1.py through run_phase6.py, make_sample_pdf.py
+scripts/        check_setup.py, run_phase1.py through run_phase7.py, make_sample_pdf.py
 ```
 
 Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.env`.
@@ -165,6 +178,6 @@ Uploaded notes will go in `data/uploads/`, which git ignores. Do not commit `.en
 | 4 | Grader, structured outputs, fallback | Done |
 | 5 | Quiz and weak-topic tracking | Done |
 | 6 | Revision plan with human approval | Done |
-| 7 | Supervisor and persisted sessions | Not started |
+| 7 | Supervisor and persisted sessions | Done |
 | 8 | Evaluation numbers | Not started |
 | 9 | Streamlit UI and README polish | Not started |

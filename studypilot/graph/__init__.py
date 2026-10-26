@@ -1,4 +1,4 @@
-"""LangGraph graphs. One graph answers questions, grades them, writes quizzes, and drafts plans."""
+"""LangGraph graphs. One graph answers, grades, quizzes, drafts plans, and can route with a supervisor."""
 
 from studypilot.graph.qa_graph import StudyState, build_qa_graph, initial_state, run_qa
 

@@ -22,10 +22,12 @@ from studypilot.graph.qa_graph import (
     build_qa_graph,
     classify_question,
     initial_state,
+    route_with_model,
     write_plan_with_model,
     write_quiz_with_model,
 )
-from studypilot.models.schemas import GradeResult, PlanItem, QuizQuestion, RevisionPlan
+from studypilot.models.schemas import GradeResult, PlanItem, QuizQuestion, RevisionPlan, RouteDecision
+from studypilot.session import open_checkpointer
 from studypilot.rag.store import ingest_documents
 
 _KEYWORDS = ("deadlock", "coffman", "quantum", "amdahl", "thread")
@@ -520,6 +522,117 @@ def test_write_plan_with_model_asks_for_the_schema() -> None:
     assert model.schema is RevisionPlan
     assert "Exam date: 2026-12-01" in model.prompts[0]
     assert "- deadlock" in model.prompts[0]
+
+
+def test_supervisor_can_choose_quiz_when_the_keywords_would_not(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    model = FakeModel()
+    written = _quiz_question()
+
+    def router(_state: dict) -> RouteDecision:
+        return RouteDecision(route="quiz", reason="They asked to drill the topic.")
+
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=model,
+        quiz_writer=lambda _state: written,
+        router=router,
+    )
+
+    state = _run(graph, "Explain deadlock")
+
+    assert state["route"] == "quiz"
+    assert state["route_reason"] == "They asked to drill the topic."
+    assert model.calls == 0
+    assert "How many Coffman" in state["answer"]
+
+
+def test_broken_supervisor_falls_back_to_keywords(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+
+    def router(_state: dict) -> RouteDecision:
+        raise RuntimeError("supervisor down")
+
+    graph = build_qa_graph(
+        persist_directory=persist,
+        embeddings=embeddings,
+        chat_model=FakeModel(),
+        router=router,
+        use_supervisor=True,
+    )
+
+    state = _run(graph, "What should I study before my exam date?")
+
+    assert state["route"] == "plan"
+    assert state["route_reason"] == "keyword rules"
+    assert state["answer"] == PLAN_NEEDS_TOPICS
+
+
+def test_route_with_model_asks_for_the_schema() -> None:
+    decision = RouteDecision(route="plan", reason="They named an exam.")
+    model = FakeStructuredModel(decision)
+
+    got = route_with_model({"question": "Help me revise before Friday."}, chat_model=model)
+
+    assert got == decision
+    assert model.schema is RouteDecision
+    assert "Help me revise before Friday." in model.prompts[0]
+
+
+def test_route_with_model_drops_a_bad_payload() -> None:
+    state = {"question": "What is a deadlock?"}
+
+    assert route_with_model(state, chat_model=FakeStructuredModel({"route": "chat"})) is None
+    assert route_with_model(state, chat_model=FakeStructuredModel(RuntimeError("down"))) is None
+
+
+def test_paused_plan_resumes_from_a_reopened_database(tmp_path: Path) -> None:
+    persist, embeddings = _index(tmp_path)
+    db = tmp_path / "session.sqlite"
+    calls = {"n": 0}
+
+    def writer(_state: dict) -> RevisionPlan:
+        calls["n"] += 1
+        return _plan()
+
+    config = {
+        "recursion_limit": MAX_GRAPH_STEPS,
+        "configurable": {"thread_id": "local"},
+    }
+    question = "Build a revision schedule before my exam date 2026-12-01."
+    saver = open_checkpointer(db)
+    try:
+        graph = build_qa_graph(
+            persist_directory=persist,
+            embeddings=embeddings,
+            chat_model=FakeModel(),
+            plan_writer=writer,
+            checkpointer=saver,
+        )
+        paused = graph.invoke(initial_state(question, ["deadlock"]), config)
+        assert calls["n"] == 1
+        assert paused["__interrupt__"]
+        assert graph.get_state(config).next
+    finally:
+        saver.conn.close()
+
+    saver = open_checkpointer(db)
+    try:
+        graph = build_qa_graph(
+            persist_directory=persist,
+            embeddings=embeddings,
+            chat_model=FakeModel(),
+            plan_writer=writer,
+            checkpointer=saver,
+        )
+        finished = graph.invoke(Command(resume="approve"), config)
+    finally:
+        saver.conn.close()
+
+    assert calls["n"] == 1
+    assert finished["plan_status"] == "approved"
+    assert "deadlock (25 min)" in finished["answer"]
 
 
 def test_write_plan_with_model_drops_a_bad_payload() -> None:

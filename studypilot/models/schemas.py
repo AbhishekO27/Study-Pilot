@@ -3,14 +3,23 @@
 Phase 4 uses GradeResult in the graph. Phase 5 asks the model to fill
 QuizQuestion. AnswerGrade is filled in code from correct_index, not by the
 model. Phase 6 asks the model to fill RevisionPlan, then Python keeps only
-the weak topics and the exam date from the question.
+the weak topics and the exam date from the question. Phase 7 asks the
+model to fill RouteDecision when the supervisor is turned on.
 """
 
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class RouteDecision(BaseModel):
+    """Which branch should run. The supervisor must fill this; keywords are the fallback."""
+
+    route: Literal["qa", "quiz", "plan"]
+    reason: str = Field(description="One short sentence a student could read.")
 
 
 class GradeResult(BaseModel):
